@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Travel Explorer Interactive</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', sans-serif;
+    background: #3e2723;
+    color: #f3e5ab;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    transition: background 0.5s, color 0.5s;
+  }
+  body.light { background: #f3e5ab; color: #3e2723; }
+  .container { text-align: center; width: 95%; max-width: 1000px; }
+  button {
+    padding: 10px 20px;
+    margin: 5px;
+    background: #6d4c41;
+    border: none;
+    color: #fff;
+    font-size: 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+  button:hover { background: #a1887f; }
+  input, select { padding: 10px; margin: 5px; border-radius: 8px; border: none; outline: none; font-size: 16px; }
+  .hidden { display: none; }
+  .globe { width: 150px; height: 150px; border-radius: 50%; margin: 40px auto; background: radial-gradient(circle, #6d4c41, #3e2723); border: 4px solid #f3e5ab; animation: spin 3s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .card { background: #5d4037; margin: 20px auto; padding: 20px; border-radius: 15px; box-shadow: 0px 5px 15px rgba(0,0,0,0.4); text-align: left; transition: background 0.5s; }
+  body.light .card { background: #e6d6c1; color:#3e2723; }
+  .card h2, .card h3 { color: #ffe0b2; transition: color 0.5s; }
+  body.light .card h2, body.light .card h3 { color: #3e2723; }
+  .nearby-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px; margin-top: 15px; }
+  .nearby-card { background: #6d4c41; border-radius: 12px; padding: 10px; text-align: center; box-shadow: 0px 4px 10px rgba(0,0,0,0.3); transition: background 0.5s; }
+  body.light .nearby-card { background: #d7c0ae; color: #3e2723; }
+  #map { height: 500px; width: 100%; border-radius: 12px; margin-top: 15px; }
+  .weather-icon { font-size: 24px; margin-left: 10px; }
+  .progress-container { width: 100%; background: #6d4c41; border-radius: 12px; height: 20px; margin-top: 10px; }
+  body.light .progress-container { background: #d7c0ae; }
+  .progress-bar { height: 100%; width: 0; background: #f3e5ab; border-radius: 12px; transition: width 0.5s; }
+  #destImage { width: 100%; height: 300px; object-fit: cover; border-radius: 12px; margin-top: 10px; }
+  #savedList { margin-top: 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Welcome -->
+  <div id="welcome">
+    <h1>🌍 Welcome Traveler!</h1>
+    <p>Let’s begin our journey and fill life with sweet memories ✨</p>
+    <button onclick="startJourney()">Start Journey</button>
+    <button onclick="toggleTheme()">Toggle Dark/Light</button>
+  </div>
+
+  <!-- Form -->
+  <div id="formPage" class="hidden">
+    <h2>Enter Your Travel Details</h2>
+    <select id="mode">
+      <option value="Train">🚆 Train</option>
+      <option value="Flight">✈️ Flight</option>
+      <option value="Car">🚗 Car</option>
+    </select><br>
+    <input type="text" id="destination" placeholder="Destination"><br>
+    <input type="number" id="budget" placeholder="Budget"><br>
+    <input type="number" id="persons" placeholder="Number of Persons"><br>
+    <button onclick="fetchData()">Explore</button>
+    <button onclick="toggleTheme()">Toggle Dark/Light</button>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" class="hidden">
+    <h2>Fetching your travel plan...</h2>
+    <div class="globe"></div>
+  </div>
+
+  <!-- Result -->
+  <div id="resultPage" class="hidden">
+    <div class="card">
+      <h2 id="destName"></h2>
+      <p><b>Weather:</b> <span id="weather">Sunny, 28°C</span><span class="weather-icon" id="weatherIcon">☀️</span></p>
+      <div class="progress-container">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <img id="destImage" src="" alt="Destination Image">
+    </div>
+
+    <div class="card">
+      <h3>Nearby Places</h3>
+      <div class="nearby-grid" id="nearbyList"></div>
+    </div>
+
+    <div class="card">
+      <h3>🗺️ Map</h3>
+      <div id="map"></div>
+    </div>
+
+    <div class="card">
+      <h3>💾 Saved Destinations</h3>
+      <button onclick="saveDestination()">Save Destination</button>
+      <div id="savedList"></div>
+    </div>
+
+    <button onclick="toggleTheme()">Toggle Dark/Light</button>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+// Theme toggle
+if(localStorage.getItem("theme")=="light") document.body.classList.add("light");
+function toggleTheme(){
+  document.body.classList.toggle('light');
+  localStorage.setItem("theme", document.body.classList.contains('light')?"light":"dark");
+}
+
+let map, travelerMarker, polyline;
+
+// Destination -> Nearby places mapping
+const destinationNearby = {
+  "Chennai": [
+    {name:"Marina Beach", lat:13.04, lon:80.28},
+    {name:"Fort St. George", lat:13.08, lon:80.29},
+    {name:"Kapaleeshwarar Temple", lat:13.03, lon:80.27}
+  ],
+  "Bangalore": [
+    {name:"Lalbagh Botanical Garden", lat:12.95, lon:77.59},
+    {name:"Bangalore Palace", lat:12.99, lon:77.59},
+    {name:"Cubbon Park", lat:12.97, lon:77.59}
+  ],
+  "Mumbai": [
+    {name:"Gateway of India", lat:18.92, lon:72.83},
+    {name:"Marine Drive", lat:18.94, lon:72.82},
+    {name:"Chhatrapati Shivaji Terminus", lat:18.94, lon:72.83}
+  ]
+};
+
+// Destination images
+const destImages = {
+  "Chennai":"https://source.unsplash.com/800x500/?chennai",
+  "Bangalore":"https://source.unsplash.com/800x500/?bangalore",
+  "Mumbai":"https://source.unsplash.com/800x500/?mumbai"
+};
+
+// Weather animation mapping
+const weatherEmojis = { "Sunny":"☀️", "Cloudy":"☁️", "Rainy":"🌧️", "Windy":"🌬️" };
+
+function startJourney(){
+  document.getElementById("welcome").classList.add("hidden");
+  document.getElementById("formPage").classList.remove("hidden");
+}
+
+function randomWeather(){
+  const conditions = ["Sunny","Cloudy","Rainy","Windy"];
+  let cond = conditions[Math.floor(Math.random()*conditions.length)];
+  let temp = 20 + Math.floor(Math.random()*15);
+  let humidity = 40 + Math.floor(Math.random()*40);
+  let wind = 5 + Math.floor(Math.random()*15);
+  return {desc:`${cond}, ${temp}°C, Humidity: ${humidity}%, Wind: ${wind} km/h`, icon:weatherEmojis[cond]};
+}
+
+// Fetch data and display
+async function fetchData(){
+  document.getElementById("formPage").classList.add("hidden");
+  document.getElementById("loading").classList.remove("hidden");
+
+  let dest = document.getElementById("destination").value || "Chennai";
+
+  setTimeout(async()=>{
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("resultPage").classList.remove("hidden");
+    document.getElementById("destName").innerText = dest;
+
+    // Weather
+    let weather = randomWeather();
+    document.getElementById("weather").innerText = weather.desc;
+    document.getElementById("weatherIcon").innerText = weather.icon;
+
+    // Destination Image
+    document.getElementById("destImage").src = destImages[dest] || "https://source.unsplash.com/800x500/?travel";
+
+    // Coordinates
+    let coords=[13.08,80.27]; // Default Chennai
+    try{
+      let res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${dest}`);
+      let data = await res.json();
+      if(data.length>0) coords=[data[0].lat,data[0].lon];
+    }catch(err){ console.error(err); }
+
+    // Map
+    map = L.map('map').setView(coords, 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+    travelerMarker=L.marker(coords,{icon:L.icon({iconUrl:'https://img.icons8.com/emoji/48/000000/red-circle-emoji.png',iconSize:[30,30]})}).addTo(map).bindPopup(`You are here: ${dest}`).openPopup();
+
+    // Nearby
+    let nearby=destinationNearby[dest]||destinationNearby["Chennai"];
+    let listHTML="";
+    nearby.forEach(place=>{
+      let travelTime=Math.floor(Math.random()*5)+1;
+      listHTML+=`<div class="nearby-card">
+        <h4>${place.name}</h4>
+        <p>Approx. ${travelTime} hours from ${dest}</p>
+        <button onclick="animateTravel([${coords}], [${place.lat}, ${place.lon}])">Go Here</button>
+      </div>`;
+      let marker=L.marker([place.lat,place.lon]).addTo(map).bindPopup(`${place.name} (${travelTime}h away)`);
+      marker.on('click',()=>animateTravel([coords[0],coords[1]],[place.lat,place.lon]));
+    });
+    document.getElementById("nearbyList").innerHTML=listHTML;
+
+    // Reset progress bar
+    document.getElementById("progressBar").style.width="0%";
+  },1500);
+}
+
+// Animate travel along polyline with progress bar
+function animateTravel(start,end){
+  if(travelerMarker) travelerMarker.remove();
+  if(polyline) polyline.remove();
+
+  travelerMarker=L.marker(start,{icon:L.icon({iconUrl:'https://img.icons8.com/emoji/48/000000/red-circle-emoji.png',iconSize:[30,30]})}).addTo(map);
+  polyline=L.polyline([start,end],{color:'orange'}).addTo(map);
+  map.fitBounds(polyline.getBounds());
+
+  let steps=50,i=0;
+  let latStep=(end[0]-start[0])/steps, lonStep=(end[1]-start[1])/steps;
+  let interval=setInterval(()=>{
+    if(i>=steps){ clearInterval(interval); return; }
+    travelerMarker.setLatLng([start[0]+latStep*i, start[1]+lonStep*i]);
+    document.getElementById("progressBar").style.width=`${Math.floor((i/steps)*100)}%`;
+    i++;
+  },50);
+}
+
+// Save favorite destination
+function saveDestination(){
+  let dest=document.getElementById("destName").innerText;
+  let weather=document.getElementById("weather").innerText;
+  let saved=JSON.parse(localStorage.getItem("savedDestinations")||"[]");
+  saved.push({dest,weather,date:new Date().toLocaleString()});
+  localStorage.setItem("savedDestinations",JSON.stringify(saved));
+  showSavedDestinations();
+}
+
+// Show saved destinations
+function showSavedDestinations(){
+  let saved=JSON.parse(localStorage.getItem("savedDestinations")||"[]");
+  let listHTML=saved.map(s=>`<p>${s.dest} (${s.weather}) - ${s.date}</p>`).join("");
+  document.getElementById("savedList").innerHTML=listHTML;
+}
+
+// Display saved destinations on page load
+showSavedDestinations();
+</script>
+</body>
+</html>
